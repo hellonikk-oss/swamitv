@@ -48,12 +48,13 @@ with sync_playwright() as p:
         # district_row= rows.nth(15).locator("td")
                
         # 2. Click district row to open block-level view
-        district_link = page.wait_for_selector("(//td[@class='cell-sno' and text()='1']/following-sibling::td[@class='cell-wrap'])[1]", timeout=10000)
-        district_link.click(force=True)
+        page.wait_for_selector("//a[contains(text(),'जबलपुर')]").click()
+        # district_link = page.wait_for_selector("(//td[@class='cell-sno' and text()='1']/following-sibling::td[@class='cell-wrap'])[1]", timeout=10000)
+        # district_link.click(force=True)
         page.wait_for_load_state('networkidle', timeout=15000)
 
         # 3. Download Block level report
-        block_download = page.wait_for_selector("#viewDownloadBtn", timeout=30000)
+        block_download = page.wait_for_selector("button.btn-download-excel", timeout=30000)
         with page.expect_download() as download_info:
             block_download.click(force=True)
         download = download_info.value
