@@ -1,83 +1,108 @@
 
 
-
 import pandas as pd
 import os
 
+# Automatically locate the 'file' folder (targets swamitv/file)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FILE_DIR = os.path.join(BASE_DIR, 'file')
+os.makedirs(FILE_DIR, exist_ok=True)
+
+
+def check_files_exist(file_paths):
+    """Verify all required input files exist before processing."""
+    missing = [p for p in file_paths if not os.path.exists(p)]
+    if missing:
+        print("Skipping step — missing required file(s):")
+        for m in missing:
+            print(f"  - {m}")
+        print(f"Files currently inside '{FILE_DIR}': {os.listdir(FILE_DIR)}")
+        return False
+    return True
+
+
+def sort_with_total_at_bottom(df, name_col, sort_cols=None, ascending=True):
+    """Separates the 'Total' row, sorts the remaining rows, and places 'Total' at the bottom."""
+    is_total = df[name_col].astype(str).str.strip().str.lower() == 'total'
+    total_row = df[is_total]
+    main_df = df[~is_total]
+
+    if sort_cols:
+        main_df = main_df.sort_values(by=sort_cols, ascending=ascending)
+
+    return pd.concat([main_df, total_row], ignore_index=True)
+
 
 def download_Final_district():
-    # Check if the file exists before trying to remove it
-    if os.path.exists('./file/final_district.xlsx'):
-        os.remove('./file/final_district.xlsx')
+    district_file = os.path.join(FILE_DIR, 'district.xls')
+    district_old_file = os.path.join(FILE_DIR, 'district_old.xls')
+    output_file = os.path.join(FILE_DIR, 'final_district.xlsx')
 
-    # Load all of df1
-    df1 = pd.read_excel('./file/district.xls', sheet_name='Data')
+    if not check_files_exist([district_file, district_old_file]):
+        return
 
-    # Load ONLY 'District Name' (for merging) and 'Completed' from df2
-    df2 = pd.read_excel('./file/district_old.xls', sheet_name='Data', usecols=['District Name', 'Completed'])
+    if os.path.exists(output_file):
+        os.remove(output_file)
 
-    # Merge them. Because df2 only has 'Completed', only that column gets the '_old' suffix
-    df3 = pd.merge(df1, df2, how='outer', on="District Name", suffixes=('', '_old'))
+    df1 = pd.read_excel(district_file, sheet_name='Data')
+    df2 = pd.read_excel(district_old_file, sheet_name='Data', usecols=['District Name', 'Completed'])
 
-    # 1. Calculate the progress (Completed - Completed_old)
-    df3['Progress'] = df3['Completed'] - df3['Completed_old']
+    df3 = pd.merge(df1, df2, how='outer', on='District Name', suffixes=('', '_old'))
+    df3['Progress'] = df3['complet'] - df3['Completed_old']
 
-    # 2. Find the index position of 'Completion %'
     target_idx = df3.columns.get_loc('Completion %')
+    df3.insert(target_idx, 'Completed_old', df3.pop('Completed_old'))
+    df3.insert(target_idx + 1, 'Progress', df3.pop('Progress'))
 
-    # 3. Move 'Completed_old' before 'Completion %'
-    completed_old_col = df3.pop('Completed_old')
-    df3.insert(target_idx, 'Completed_old', completed_old_col)
+    # Sort by Completion % while keeping 'Total' at the very last row
+    df3 = sort_with_total_at_bottom(df3, 'District Name', sort_cols=['Completion %'], ascending=[True])
 
-    # 4. Move the new 'Progress' column to sit next to them
-    progress_col = df3.pop('Progress')
-    df3.insert(target_idx + 1, 'Progress', progress_col)
-
-    # Save the final output
-    df3.to_excel('./file/final_district.xlsx', index=False, sheet_name='Data')
-
+    df3.to_excel(output_file, index=False, sheet_name='Data')
+    print(f"Saved: {output_file}")
 
 
 def download_Final_block():
-    # Check if the file exists before trying to remove it
-    if os.path.exists('./file/final_block.xlsx'):
-        os.remove('./file/final_block.xlsx')
+    block_file = os.path.join(FILE_DIR, 'block.xls')
+    block_old_file = os.path.join(FILE_DIR, 'block_old.xls')
+    typedate_file = os.path.join(FILE_DIR, 'svamitva_registry_tehsilwise.xlsx')
+    output_file = os.path.join(FILE_DIR, 'final_block.xlsx')
 
-    # Load all of df1
-    df1 = pd.read_excel('./file/block.xls', sheet_name='Data')
+    if not check_files_exist([block_file, block_old_file, typedate_file]):
+        return
 
-    # Load ONLY 'Block Name' (for merging) and 'Completed' from df2
-    df2 = pd.read_excel('./file/block_old.xls', sheet_name='Data', usecols=['Tehsil Name', 'Completed'])
+    if os.path.exists(output_file):
+        os.remove(output_file)
 
-    # Merge them. Because df2 only has 'Completed', only that column gets the '_old' suffix
-    df3 = pd.merge(df1, df2, how='outer', on="Tehsil Name", suffixes=('', '_old'))
+    df1 = pd.read_excel(block_file, sheet_name='Data')
+    df2 = pd.read_excel(block_old_file, sheet_name='Data', usecols=['Tehsil Name', 'Completed'])
 
-    # 1. Calculate the progress (Completed - Completed_old)
+    df3 = pd.merge(df1, df2, how='outer', on='Tehsil Name', suffixes=('', '_old'))
     df3['Progress'] = df3['Completed'] - df3['Completed_old']
 
-    # 2. Find the index position of 'Completion %'
     target_idx = df3.columns.get_loc('Completion %')
+    df3.insert(target_idx, 'Completed_old', df3.pop('Completed_old'))
+    df3.insert(target_idx + 1, 'Progress', df3.pop('Progress'))
 
-    # 3. Move 'Completed_old' before 'Completion %'
-    completed_old_col = df3.pop('Completed_old')
-    df3.insert(target_idx, 'Completed_old', completed_old_col)
+    # Keep 'Total' at the bottom of the Data sheet
+    df3 = sort_with_total_at_bottom(df3, 'Tehsil Name')
+    df3.to_excel(output_file, index=False, sheet_name='Data')
 
-    # 4. Move the new 'Progress' column to sit next to them
-    progress_col = df3.pop('Progress')
-    df3.insert(target_idx + 1, 'Progress', progress_col)
-    df3.to_excel('./file/final_block.xlsx', index=False, sheet_name='Data')
+    df_type = pd.read_excel(typedate_file, sheet_name='detail', usecols=['Tehsil Name', 'type'])
+    df4 = pd.merge(df3, df_type, how='outer', on='Tehsil Name', suffixes=('', '_old'))
 
-    # Save the final output
-   
-    source_file = './file/final_block.xlsx'
-    typedate_file= './file/svamitva_registry_report.xlsx'
-    df2= pd.read_excel(typedate_file, sheet_name='detail', usecols=['Tehsil Name', 'type'])
-    df4 = pd.merge(df3, df2, how='outer', on="Tehsil Name", suffixes=('', '_old'))
-    df4 = df4[df4['type'].isin(['1urban', 'rural'])]
-    df4 = df4.sort_values(by=['type', 'Completion %'], ascending=[True, True]).reset_index(drop=True)
-    with pd.ExcelWriter(source_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-      df4.to_excel(writer, index=False, sheet_name='sheet1')
-        
+    # Keep 'Total' row even when filtering by '1urban' and 'rural'
+    is_total = df4['Tehsil Name'].astype(str).str.strip().str.lower() == 'total'
+    df4 = df4[df4['type'].isin(['1urban', 'rural']) | is_total]
 
-download_Final_block()
-download_Final_district()
+    # Sort by type and Completion % while keeping 'Total' at the very last row
+    df4 = sort_with_total_at_bottom(df4, 'Tehsil Name', sort_cols=['type', 'Completion %'], ascending=[True, True])
+
+    with pd.ExcelWriter(output_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+        df4.to_excel(writer, index=False, sheet_name='sheet1')
+    print(f"Saved: {output_file}")
+
+
+if __name__ == '__main__':
+    download_Final_block()
+    download_Final_district()
+    

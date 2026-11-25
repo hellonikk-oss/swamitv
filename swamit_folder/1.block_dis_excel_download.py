@@ -1,71 +1,138 @@
-from playwright.sync_api import sync_playwright
+import re
 import os
 import sys
+import json
+from playwright.sync_api import sync_playwright
 
 # Ensure UTF-8 output encoding for Windows terminal
 sys.stdout.reconfigure(encoding='utf-8')
 
-# L-1 complain download function
-os.makedirs('file', exist_ok=True)
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FILE_DIR = os.path.join(BASE_DIR, 'file')
+os.makedirs(FILE_DIR, exist_ok=True)
+
 
 def download_handle_district(download):
     print('download started')
-    if os.path.exists('./file/district.xls'):
-        if os.path.exists('./file/district_old.xls'):
-            os.remove('./file/district_old.xls')
-        os.rename('./file/district.xls', './file/district_old.xls')
-    download.save_as('./file/district.xls')  # provide the path where you want to save the downloaded file
+    district_file = os.path.join(FILE_DIR, 'district.xls')
+    district_old_file = os.path.join(FILE_DIR, 'district_old.xls')
+    if os.path.exists(district_file):
+        if os.path.exists(district_old_file):
+            os.remove(district_old_file)
+        os.rename(district_file, district_old_file)
+    download.save_as(district_file)
     print('download completed District')
+
 
 def download_handle_block(download):
     print('download started')
-    if os.path.exists('./file/block.xls'):
-        if os.path.exists('./file/block_old.xls'):
-            os.remove('./file/block_old.xls')
-        os.rename('./file/block.xls', './file/block_old.xls')
-    download.save_as('./file/block.xls')  # provide the path where you want to save the downloaded file
+    block_file = os.path.join(FILE_DIR, 'block.xls')
+    block_old_file = os.path.join(FILE_DIR, 'block_old.xls')
+    if os.path.exists(block_file):
+        if os.path.exists(block_old_file):
+            os.remove(block_old_file)
+        os.rename(block_file, block_old_file)
+    download.save_as(block_file)
     print('download completed Block')
-    
-    
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page()
-      
-    page.goto('https://services.mpigr.gov.in/svamitva_dashboard/', timeout=30000)
-    page.wait_for_load_state('networkidle', timeout=15000)
-     
-    try:
-        # 1. Download District level report
-        excel_download = page.wait_for_selector("#viewDownloadBtn", timeout=10000)
-        with page.expect_download() as download_info:
-            excel_download.click(force=True)  # Force the click even if Playwright thinks it is hidden
-        download = download_info.value
-        download_handle_district(download)
-        page.wait_for_load_state('networkidle', timeout=15000)
-        
-        # table = page.locator("//table[@id='districtTable']", timeout=10000)
-        # rows = table.locator("tr")
-        # district_row= rows.nth(15).locator("td")
-               
-        # 2. Click district row to open block-level view
-        page.wait_for_selector("//a[contains(text(),'जबलपुर')]").click()
-        # district_link = page.wait_for_selector("(//td[@class='cell-sno' and text()='1']/following-sibling::td[@class='cell-wrap'])[1]", timeout=10000)
-        # district_link.click(force=True)
-        page.wait_for_load_state('networkidle', timeout=15000)
 
-        # 3. Download Block level report
-        block_download = page.wait_for_selector("button.btn-download-excel", timeout=30000)
-        with page.expect_download() as download_info:
-            block_download.click(force=True)
-        download = download_info.value
-        download_handle_block(download)
-                           
-    except Exception as inner_e:
-        print(f"\n[X] Error during execution: {inner_e}")
-        
-    except Exception as e:
-        print(f"\n[X] Error: {e}")
-        print("\nPossible reasons:\n website server error, network connectivity issue, or the element not being found.")
+
+def download_svamitva_excel(headless=False):
+    """Downloads district and block-level Svamitva Excel reports and fetches the last refreshed time.
+
+    Launches a Chromium browser via Playwright to navigate the MPIGR Svamitva dashboard,
+    downloads the district-level report ('./file/district.xls'), opens the Jabalpur
+    block-level view to download the block report ('./file/block.xls'), and extracts
+    the dashboard's last refreshed timestamp with minutes rounded to ':00'.
+    Existing report files are rotated to '_old.xls' before saving new ones.
+
+    Args:
+        headless (bool, optional): If True, runs the browser in headless mode without
+            a visible UI. Defaults to False.
+
+    Returns:
+        str | None: The formatted last refreshed timestamp (e.g., '23 Nov 2026, 05:00 PM IST'),
+            or None if an error occurs during execution.
+    """
+
     
-    finally:
-        browser.close()
+    os.makedirs('file', exist_ok=True)
+    full_text_hour = None
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        page = browser.new_page()
+
+        try:
+            page.goto('https://services.mpigr.gov.in/svamitva_dashboard/district-registration', timeout=30000)
+            page.wait_for_load_state('networkidle', timeout=15000)
+
+            # 1. Download District level report
+            excel_download = page.wait_for_selector("button.btn-download-excel", timeout=10000)
+            with page.expect_download() as download_info:
+                excel_download.click(force=True)
+            download_handle_district(download_info.value)
+            page.wait_for_load_state('networkidle', timeout=15000)
+
+            # 2. Click district row to open block-level view
+            page.wait_for_selector("//a[contains(text(),'जबलपुर')]").click()
+            page.wait_for_load_state('networkidle', timeout=15000)
+
+            # 3. Download Block level report
+            block_download = page.wait_for_selector("button.btn-download-excel", timeout=30000)
+            with page.expect_download() as download_info:
+                block_download.click(force=True)
+            download_handle_block(download_info.value)
+
+            # 4. Get last refreshed timestamp
+            page.goto("https://services.mpigr.gov.in/svamitva_dashboard/", wait_until="networkidle")
+            refreshed_locator = page.locator("span.navbar-refreshed-value")
+            refreshed_locator.wait_for(state="visible")
+
+            full_text = refreshed_locator.inner_text().strip()
+            full_text_hour = re.sub(r":\d{2}", ":00", full_text)
+            print("Full text:", full_text_hour)
+
+            # Persist and rotate refreshed timestamp in refresh_time.json
+            time_file = os.path.join(FILE_DIR, 'refresh_time.json')
+            old_time = None
+            if os.path.exists(time_file):
+                try:
+                    with open(time_file, 'r', encoding='utf-8') as f:
+                        prev_data = json.load(f)
+                        old_time = prev_data.get('current_time')
+                except Exception:
+                    pass
+
+            # Fallback to the modification time of the previous downloaded file
+            if not old_time:
+                district_old = os.path.join(FILE_DIR, 'district_old.xls')
+                if os.path.exists(district_old):
+                    from datetime import datetime
+                    dt = datetime.fromtimestamp(os.path.getmtime(district_old))
+                    old_time = dt.strftime("%d %b %Y, %I:00 %p IST")
+
+            time_data = {
+                'current_time': full_text_hour,
+                'old_time': old_time
+            }
+            try:
+                with open(time_file, 'w', encoding='utf-8') as f:
+                    json.dump(time_data, f, indent=2)
+                print(f"Saved refreshed time to {time_file}")
+            except Exception as e:
+                print(f"Warning: could not save {time_file}: {e}")
+
+        except Exception as e:
+            print(f"\n[X] Error during execution: {e}")
+            print("\nPossible reasons: website server error, network connectivity issue, or element not found.")
+
+        finally:
+            browser.close()
+
+    return full_text_hour
+
+
+if __name__ == "__main__":
+    refreshed_time = download_svamitva_excel()
+    print("Returned value:", refreshed_time)
